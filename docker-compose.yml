@@ -1,71 +1,83 @@
-version: "3.8"
-
 services:
-  # Service API FastAPI
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: fit4110-api-lab05
-    env_file:
-      - .env
-    depends_on:
-      db:
-        condition: service_healthy
-      ai-service:
-        condition: service_healthy
-    networks:
-      - team-internal
-      - class-net
-    ports:
-      - "${APP_PORT:-8000}:8000"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-
-  # PostgreSQL database service
-  db:
-    image: postgres:15-alpine
-    container_name: fit4110-db-lab05
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: team-notify-rabbitmq
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-lab05}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab05pass}
-      POSTGRES_DB: ${POSTGRES_DB:-iotdb}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-notify_user}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-notify_pass_123}
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
     volumes:
-      - db-data:/var/lib/postgresql/data
+      - rabbitmq-data:/var/lib/rabbitmq
     networks:
       - team-internal
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab05}"]
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 20s
 
-  # AI service mẫu dùng Python HTTP server hoặc FastAPI
-  ai-service:
-    image: python:3.11-slim
-    container_name: fit4110-ai-lab05
-    working_dir: /service
-    volumes:
-      - ./src/ai_service:/service
-    command: ["python", "main.py"]
+  notify-api:
+    build:
+      context: ./src/notify_app
+      dockerfile: Dockerfile
+    image: smart-campus/notify-api:v0.1.0-team-notify
+    container_name: team-notify-api
+    env_file:
+      - .env.example
+    environment:
+      APP_HOST: ${APP_HOST:-0.0.0.0}
+      APP_PORT: ${APP_PORT:-8000}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-notify_user}
+      RABBITMQ_PASS: ${RABBITMQ_PASS:-notify_pass_123}
+      RABBITMQ_QUEUE: ${RABBITMQ_QUEUE:-notifications}
+    ports:
+      - "${APP_PORT:-8000}:${APP_PORT:-8000}"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - team-internal
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import requests; import sys; sys.exit(0) if requests.get('http://localhost:9000/health').status_code == 200 else sys.exit(1)\""]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  notify-worker:
+    build:
+      context: ./src/worker
+      dockerfile: Dockerfile
+    image: smart-campus/notify-worker:v0.1.0-team-notify
+    container_name: team-notify-worker
+    env_file:
+      - .env.example
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-notify_user}
+      RABBITMQ_PASS: ${RABBITMQ_PASS:-notify_pass_123}
+      RABBITMQ_QUEUE: ${RABBITMQ_QUEUE:-notifications}
+      SMTP_DUMMY_TOKEN: ${SMTP_DUMMY_TOKEN:-dummy-smtp-token}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - team-internal
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
 networks:
   team-internal:
+    name: team-internal
     driver: bridge
-  class-net:
-    external: true
 
 volumes:
-  db-data:
+  rabbitmq-data:

@@ -1,114 +1,138 @@
-# RUN_COMPOSE.md – Hướng dẫn chạy Lab 05
+# RUN_COMPOSE.md - Hướng dẫn chạy Lab 05
 
-Tài liệu này hướng dẫn người khác clone repo sạch và chạy lại stack Compose của Lab 05.
+**Người thực hiện:** Sinh viên Trần Mạnh Hùng  
+**MSSV:** 1771020313  
+**Lớp:** CNTT17-10  
+**Vai trò:** team-notify - Smart Campus Operations Platform
 
----
+Tài liệu này mô tả các bước khởi chạy Notification API, Worker Service và RabbitMQ bằng Docker Compose.
 
-## 1. Clone repo
+## 1. Chuẩn bị môi trường
 
-```bash
-git clone <repo-url>
-cd FIT4110_lab05_docker_compose_readiness
-```
+Yêu cầu cài đặt:
 
----
+- Docker Engine hoặc Docker Desktop
+- Docker Compose v2
+- Make, nếu muốn dùng các lệnh tắt trong `Makefile`
 
-## 2. Cài dependencies cho Newman/Prism/Spectral (tuỳ chọn)
-
-```bash
-npm install
-```
-
----
-
-## 3. Build & chạy stack Docker Compose
+Tạo file môi trường local từ file mẫu:
 
 ```bash
-# Copy .env.example sang .env và chỉnh sửa nếu cần
 cp .env.example .env
+```
 
-# Build images (nếu chưa có) và khởi động các container trong nền
+File `.env.example` chỉ chứa dummy data phục vụ thực hành. Không đưa secret thật vào file này.
+
+## 2. Khởi chạy stack
+
+Chạy bằng Docker Compose:
+
+```bash
 docker compose up -d --build
 ```
 
-Lệnh trên sẽ tạo các container:
-
-- `fit4110-db-lab05` (PostgreSQL)
-- `fit4110-ai-lab05` (AI service mẫu chạy port 9000)
-- `fit4110-api-lab05` (API FastAPI trên port 8000)
-
-Theo dõi log:
+Hoặc dùng Makefile:
 
 ```bash
-docker compose logs -f
+make compose-up
 ```
 
-Sau vài giây, kiểm tra health của mỗi service:
+Stack gồm 3 service:
+
+- `team-notify-rabbitmq`: RabbitMQ broker và management UI.
+- `team-notify-api`: FastAPI service nhận request `/notify`.
+- `team-notify-worker`: Worker tiêu thụ message từ queue `notifications`.
+
+## 3. Kiểm tra trạng thái
+
+Xem danh sách container:
 
 ```bash
-# API
+docker compose ps
+```
+
+Kiểm tra API healthcheck:
+
+```bash
 curl http://localhost:8000/health
-
-# AI service
-curl http://localhost:9000/health
-
-# DB readiness
-docker exec -it fit4110-db-lab05 pg_isready -U $POSTGRES_USER
 ```
 
-Bạn cũng có thể truy cập endpoint `/predict` của AI service để xem kết quả mẫu:
+Kết quả kỳ vọng:
 
-```bash
-curl -X POST http://localhost:9000/predict
+```json
+{"status":"ok","service":"notify-api"}
 ```
 
----
-
-## 4. Chạy Newman test trên stack Compose (tuỳ chọn)
-
-```bash
-npm run test:compose
-```
-
-Report sinh tại:
+RabbitMQ Management UI có thể truy cập tại:
 
 ```text
-reports/newman-lab05-compose.xml
-reports/newman-lab05-compose.html
+http://localhost:15672
 ```
 
----
+Thông tin đăng nhập mặc định lấy từ `.env`:
 
-## 5. Dừng stack
+- Username: `notify_user`
+- Password: `notify_pass_123`
 
-Khi không cần nữa, dừng và xoá các container bằng:
+## 4. Gửi thử thông báo
+
+Gửi request vào API:
+
+```bash
+curl -X POST http://localhost:8000/notify \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Cảnh báo phòng học","message":"Nhiệt độ phòng A101 vượt ngưỡng cho phép.","recipient":"student@example.com"}'
+```
+
+Kết quả kỳ vọng:
+
+```json
+{"status":"queued","message":"Thông báo đã được đưa vào hàng đợi xử lý."}
+```
+
+Sau đó xem log worker:
+
+```bash
+docker compose logs -f notify-worker
+```
+
+Log kỳ vọng có dạng:
+
+```text
+Đã gửi thông báo thành công tới student@example.com
+```
+
+## 5. Dừng stack
+
+Dừng container:
 
 ```bash
 docker compose down
 ```
 
-Nếu muốn xoá volume dữ liệu của DB, thêm tuỳ chọn `-v`:
+Hoặc:
+
+```bash
+make compose-down
+```
+
+Nếu cần xóa cả volume dữ liệu RabbitMQ:
 
 ```bash
 docker compose down -v
 ```
 
----
-
-## 6. Lệnh nhanh
-
-Bạn có thể dùng Makefile:
+## 6. Lệnh nhanh
 
 ```bash
 make compose-up
-make compose-down
 make logs
+make compose-down
 ```
 
----
+## 7. Ghi chú vận hành
 
-## 7. Mẹo gỡ lỗi
-
-- Sử dụng `docker compose ps` để xem trạng thái container.
-- Nếu API trả lỗi kết nối DB, hãy kiểm tra biến môi trường `POSTGRES_*` trong `.env` và đảm bảo DB đã sẵn sàng (`pg_isready`).
-- Nếu AI service cần tải mô hình lớn, tăng `start_period` của healthcheck trong `docker-compose.yml`.
+- RabbitMQ dùng volume `rabbitmq-data` để lưu dữ liệu bền vững.
+- Cả ba service cùng nằm trong custom bridge network `team-internal`.
+- `notify-api` và `notify-worker` chỉ khởi động sau khi `rabbitmq` đạt trạng thái healthy.
+- Image được tag theo quy ước `v0.1.0-team-notify`.
