@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     RABBITMQ_QUEUE: str = "notifications"
     RABBITMQ_DLX: str = "notifications_dlx"
     RABBITMQ_DEAD_QUEUE: str = "notifications_dead"
+    
+    PARTNER_SERVICE_URL: str = "http://172.20.10.1:8000"
 
     @property
     def rabbitmq_url(self) -> str:

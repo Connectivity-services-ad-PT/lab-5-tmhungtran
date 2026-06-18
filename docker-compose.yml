@@ -35,8 +35,9 @@ services:
       RABBITMQ_USER: ${RABBITMQ_USER:-notify_user}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-notify_pass_123}
       RABBITMQ_QUEUE: ${RABBITMQ_QUEUE:-notifications}
+      PARTNER_SERVICE_URL: ${PARTNER_SERVICE_URL}
     ports:
-      - "${APP_PORT:-8000}:${APP_PORT:-8000}"
+      - "8000:8000"
     depends_on:
       rabbitmq:
         condition: service_healthy

@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 import aio_pika
+import httpx
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -56,7 +57,28 @@ app = FastAPI(
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": "notify-api"}
+    return {"status": "OK", "service": "notify-api"}
+
+@app.get("/partner/health")
+async def call_partner() -> dict[str, str]:
+    url = f"{settings.PARTNER_SERVICE_URL}/health"
+    logger.info("Đang gọi API đối tác tại: %s", url)
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            response = await client.get(url)
+            if response.status_code == 200:
+                partner_data = response.json()
+                return {
+                    "status": "OK",
+                    "partner_url": url,
+                    "partner_response": partner_data.get("status", "Unknown")
+                }
+            else:
+                logger.warning("API đối tác trả về mã trạng thái: %d", response.status_code)
+                raise HTTPException(status_code=503, detail="Service phụ thuộc timeout/lỗi")
+    except Exception as exc:
+        logger.error("Lỗi/timeout khi gọi API đối tác: %s", str(exc))
+        raise HTTPException(status_code=503, detail="Service phụ thuộc timeout/lỗi")
 
 @app.post("/notify", status_code=202)
 async def notify(payload: NotificationPayload, request: Request) -> dict[str, str]:
